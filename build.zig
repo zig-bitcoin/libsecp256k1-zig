@@ -47,12 +47,11 @@ pub fn build(b: *std.Build) !void {
     const libsecp256k1 = try buildSecp256k1(b, target, optimize);
     b.installArtifact(libsecp256k1);
 
-    const lib = b.addModule("secp256k1", .{
+    _ = b.addModule("secp256k1", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
-    lib.linkLibrary(libsecp256k1);
 
     const exe = b.addExecutable(.{
         .name = "libsecp256k1-zig",
