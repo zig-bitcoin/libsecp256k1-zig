@@ -27,11 +27,6 @@ fn buildSecp256k1(libsecp_c: *std.Build.Dependency, b: *std.Build, target: std.B
     lib.defineCMacro("USE_FIELD_INV_BUILTIN", "1");
     lib.defineCMacro("USE_SCALAR_INV_BUILTIN", "1");
 
-    // lib.installHeader(libsecp_c.path("include/secp256k1.h"), "secp256k1.h");
-    // lib.installHeader(libsecp_c.path("include/secp256k1_recovery.h"), "secp256k1_recovery.h");
-    // lib.installHeader(libsecp_c.path("include/secp256k1_preallocated.h"), "secp256k1_preallocated.h");
-    // lib.installHeader(libsecp_c.path("include/secp256k1_schnorrsig.h"), "secp256k1_schnorrsig.h");
-
     lib.installHeadersDirectory(libsecp_c.path("src"), "", .{ .include_extensions = &.{".h"} });
     lib.installHeadersDirectory(libsecp_c.path("include/"), "", .{ .include_extensions = &.{".h"} });
     lib.linkLibC();
@@ -82,6 +77,7 @@ pub fn build(b: *std.Build) !void {
     });
     exe.addIncludePath(libsecp_c.path(""));
     exe.addIncludePath(libsecp_c.path("src"));
+
     exe.root_module.addImport("secp256k1", module);
     exe.root_module.linkLibrary(libsecp256k1);
 
