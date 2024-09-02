@@ -1,5 +1,5 @@
 const std = @import("std");
-const secp256k1 = @import("secp256k1.zig");
+const secp256k1 = @import("secp256k1");
 const Sha256 = std.crypto.hash.sha2.Sha256;
 
 pub fn generateKeypair() !void {
@@ -22,6 +22,7 @@ pub fn generateKeypair() !void {
 }
 
 pub fn main() !void {
+
     // generate key pair example
     try generateKeypair();
 }
