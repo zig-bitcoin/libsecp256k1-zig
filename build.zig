@@ -1,7 +1,12 @@
 const std = @import("std");
 
 fn buildSecp256k1(libsecp_c: *std.Build.Dependency, b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) !*std.Build.Step.Compile {
-    const lib = b.addStaticLibrary(.{ .name = "libsecp", .target = target, .optimize = optimize });
+    const lib = b.addStaticLibrary(.{
+        .name = "libsecp",
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = b.path("src/root.zig"),
+    });
 
     lib.addIncludePath(libsecp_c.path(""));
     lib.addIncludePath(libsecp_c.path("src"));
@@ -24,6 +29,7 @@ fn buildSecp256k1(libsecp_c: *std.Build.Dependency, b: *std.Build, target: std.B
     lib.installHeadersDirectory(libsecp_c.path("src"), "", .{ .include_extensions = &.{".h"} });
     lib.installHeadersDirectory(libsecp_c.path("include/"), "", .{ .include_extensions = &.{".h"} });
     lib.linkLibC();
+    b.installArtifact(lib);
 
     return lib;
 }
@@ -50,15 +56,12 @@ pub fn build(b: *std.Build) !void {
 
     // libsecp256k1 static C library.
     const libsecp256k1 = try buildSecp256k1(libsecp_c, b, target, optimize);
-    b.default_step.dependOn(&libsecp256k1.step);
-    b.installArtifact(libsecp256k1);
 
     const module = b.addModule("secp256k1", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
-
     module.addIncludePath(libsecp_c.path(""));
     module.addIncludePath(libsecp_c.path("src"));
 
