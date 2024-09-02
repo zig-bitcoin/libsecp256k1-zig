@@ -507,3 +507,5 @@ pub const SecretKey = struct {
         };
     }
 };
+
+test "test" {}

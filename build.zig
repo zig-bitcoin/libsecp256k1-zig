@@ -1,10 +1,15 @@
 const std = @import("std");
 
-fn buildSecp256k1(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) !*std.Build.Step.Compile {
-    const lib = b.addStaticLibrary(.{ .name = "libsecp", .target = target, .optimize = optimize });
+fn buildSecp256k1(libsecp_c: *std.Build.Dependency, b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) !*std.Build.Step.Compile {
+    const lib = b.addStaticLibrary(.{
+        .name = "libsecp",
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = b.path("src/secp256k1.zig"),
+    });
 
-    lib.addIncludePath(b.path("libsecp256k1/"));
-    lib.addIncludePath(b.path("libsecp256k1/src"));
+    lib.addIncludePath(libsecp_c.path(""));
+    lib.addIncludePath(libsecp_c.path("src"));
 
     var flags = std.ArrayList([]const u8).init(b.allocator);
     defer flags.deinit();
@@ -14,15 +19,16 @@ fn buildSecp256k1(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std
     try flags.appendSlice(&.{"-DENABLE_MODULE_ECDH=1"});
     try flags.appendSlice(&.{"-DENABLE_MODULE_EXTRAKEYS=1"});
 
-    lib.addCSourceFiles(.{ .root = b.path("libsecp256k1/"), .flags = flags.items, .files = &.{ "./src/secp256k1.c", "./src/precomputed_ecmult.c", "./src/precomputed_ecmult_gen.c" } });
+    lib.addCSourceFiles(.{ .root = libsecp_c.path(""), .flags = flags.items, .files = &.{ "./src/secp256k1.c", "./src/precomputed_ecmult.c", "./src/precomputed_ecmult_gen.c" } });
     lib.defineCMacro("USE_FIELD_10X26", "1");
     lib.defineCMacro("USE_SCALAR_8X32", "1");
     lib.defineCMacro("USE_ENDOMORPHISM", "1");
     lib.defineCMacro("USE_NUM_NONE", "1");
     lib.defineCMacro("USE_FIELD_INV_BUILTIN", "1");
     lib.defineCMacro("USE_SCALAR_INV_BUILTIN", "1");
-    lib.installHeadersDirectory(b.path("libsecp256k1/src"), "", .{ .include_extensions = &.{".h"} });
-    lib.installHeadersDirectory(b.path("libsecp256k1/include/"), "", .{ .include_extensions = &.{".h"} });
+
+    lib.installHeadersDirectory(libsecp_c.path("src"), "", .{ .include_extensions = &.{".h"} });
+    lib.installHeadersDirectory(libsecp_c.path("include/"), "", .{ .include_extensions = &.{".h"} });
     lib.linkLibC();
 
     return lib;
@@ -43,23 +49,37 @@ pub fn build(b: *std.Build) !void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    // libsecp256k1 static C library.
-    const libsecp256k1 = try buildSecp256k1(b, target, optimize);
-    b.installArtifact(libsecp256k1);
-
-    _ = b.addModule("secp256k1", .{
-        .root_source_file = b.path("src/root.zig"),
+    const libsecp_c = b.dependency("libsecp256k1", .{
         .target = target,
         .optimize = optimize,
     });
+
+    // libsecp256k1 static C library.
+    const libsecp256k1 = try buildSecp256k1(libsecp_c, b, target, optimize);
+
+    const module = b.addModule("secp256k1", .{
+        .root_source_file = b.path("src/secp256k1.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    module.addIncludePath(libsecp_c.path("/"));
+    module.addIncludePath(libsecp_c.path("src/"));
+    module.linkLibrary(libsecp256k1);
+
+    b.installArtifact(libsecp256k1);
 
     const exe = b.addExecutable(.{
         .name = "libsecp256k1-zig",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
-    exe.linkLibrary(libsecp256k1);
+    exe.addIncludePath(libsecp_c.path(""));
+    exe.addIncludePath(libsecp_c.path("src"));
+
+    exe.root_module.addImport("secp256k1", module);
+    exe.root_module.linkLibrary(libsecp256k1);
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
@@ -92,7 +112,7 @@ pub fn build(b: *std.Build) !void {
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
     const lib_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/root.zig"),
+        .root_source_file = b.path("src/secp256k1.zig"),
         .target = target,
         .optimize = optimize,
     });
