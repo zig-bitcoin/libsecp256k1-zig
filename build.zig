@@ -54,11 +54,6 @@ pub fn build(b: *std.Build) !void {
     });
     lib.linkLibrary(libsecp256k1);
 
-    // This declares intent for the library to be installed into the standard
-    // location when the user invokes the "install" step (the default step when
-    // running `zig build`).
-    b.installArtifact(lib);
-
     const exe = b.addExecutable(.{
         .name = "libsecp256k1-zig",
         .root_source_file = b.path("src/main.zig"),
