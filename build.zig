@@ -29,7 +29,6 @@ fn buildSecp256k1(libsecp_c: *std.Build.Dependency, b: *std.Build, target: std.B
     lib.installHeadersDirectory(libsecp_c.path("src"), "", .{ .include_extensions = &.{".h"} });
     lib.installHeadersDirectory(libsecp_c.path("include/"), "", .{ .include_extensions = &.{".h"} });
     lib.linkLibC();
-    b.installArtifact(lib);
 
     return lib;
 }
@@ -64,6 +63,8 @@ pub fn build(b: *std.Build) !void {
     });
     module.addIncludePath(libsecp_c.path(""));
     module.addIncludePath(libsecp_c.path("src"));
+
+    b.installArtifact(libsecp256k1);
 
     const exe = b.addExecutable(.{
         .name = "libsecp256k1-zig",
