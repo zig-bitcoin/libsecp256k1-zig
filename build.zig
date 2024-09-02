@@ -47,10 +47,7 @@ pub fn build(b: *std.Build) !void {
     const libsecp256k1 = try buildSecp256k1(b, target, optimize);
     b.installArtifact(libsecp256k1);
 
-    const lib = b.addStaticLibrary(.{
-        .name = "libsecp256k1-zig",
-        // In this case the main source file is merely a path, however, in more
-        // complicated build scripts, this could be a generated file.
+    const lib = b.addModule("secp256k1", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
