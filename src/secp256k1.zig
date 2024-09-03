@@ -150,6 +150,44 @@ pub const Secp256k1 = struct {
         const pk = PublicKey.fromSecretKey(self, sk);
         return .{ sk, pk };
     }
+
+    pub fn signEcdsa(
+        self: Secp256k1,
+        sk: SecretKey,
+        msghash32: [32]u8,
+    ) !Signature {
+        var sig = secp256k1.secp256k1_ecdsa_signature{};
+
+        if (secp256k1.secp256k1_ecdsa_sign(
+            self.ctx,
+            &sig,
+            &msghash32,
+            &sk.data,
+            null,
+            null,
+        ) != 1) {
+            return error.SigningFailed;
+        }
+
+        var compact_sig: [64]u8 = undefined;
+        if (secp256k1.secp256k1_ecdsa_signature_serialize_compact(self.ctx, &compact_sig, &sig) != 1) {
+            return error.SerializationFailed;
+        }
+
+        return Signature{ .inner = compact_sig };
+    }
+
+    pub fn verifyEcdsa(
+        self: Secp256k1,
+        sig: Signature,
+        msghash32: [32]u8,
+        pk: PublicKey,
+    ) !void {
+        const ecdsa_sig = sig.secp256k1_ecdsa_signature();
+        if (secp256k1.secp256k1_ecdsa_verify(self.ctx, &ecdsa_sig, &msghash32, &pk.pk) != 1) {
+            return error.InvalidSignature;
+        }
+    }
 };
 
 /// A tag used for recovering the public key from a compact signature.
@@ -395,6 +433,17 @@ pub const Signature = struct {
     pub fn toString(self: Signature) [128]u8 {
         return std.fmt.bytesToHex(&self.inner, .lower);
     }
+
+    pub fn secp256k1_ecdsa_signature(self: Signature) secp256k1.secp256k1_ecdsa_signature {
+        var sig = secp256k1.secp256k1_ecdsa_signature{};
+        std.debug.assert(1 == secp256k1.secp256k1_ecdsa_signature_parse_compact(
+            secp256k1.secp256k1_context_no_precomp,
+            &sig,
+            &self.inner,
+        ));
+
+        return sig;
+    }
 };
 
 pub const SecretKey = struct {
@@ -537,4 +586,21 @@ test "Schnorr sign" {
         expected_sig,
         sig,
     );
+}
+
+test "ECDSA verify" {
+    const secp = try Secp256k1.genNew();
+    defer secp.deinit();
+
+    const privKey = try SecretKey.fromString("d7fbc57b49b696ceaad08400622a5e8cf3f422774e67f35d3cee366e04926f65");
+    const pubKey = privKey.publicKey(secp);
+
+    var buf: [32]u8 = undefined;
+
+    // zig bitcoin
+    const msg = try std.fmt.hexToBytes(&buf, "D95F5DB92F175E6489219D1B23B3EFBF0D353DED9224DCD4B9AF3F3CB983469B");
+
+    const sig = try secp.signEcdsa(privKey, msg[0..32].*);
+
+    try secp.verifyEcdsa(sig, msg[0..32].*, pubKey);
 }
