@@ -1,4 +1,5 @@
 const std = @import("std");
+const crypto = std.crypto;
 
 const secp256k1 = @cImport({
     @cInclude("secp256k1.h");
@@ -6,8 +7,6 @@ const secp256k1 = @cImport({
     @cInclude("secp256k1_preallocated.h");
     @cInclude("secp256k1_schnorrsig.h");
 });
-
-const crypto = std.crypto;
 
 pub const KeyPair = struct {
     inner: secp256k1.secp256k1_keypair,
@@ -119,10 +118,9 @@ pub const Secp256k1 = struct {
         const ctx =
             secp256k1.secp256k1_context_create(257 | 513);
 
+        // Create 32 byte random seed.
         var seed: [32]u8 = undefined;
-
-        var rng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp()));
-        rng.fill(&seed);
+        crypto.random.bytes(&seed);
 
         const res = secp256k1.secp256k1_context_randomize(ctx, &seed);
         std.debug.assert(res == 1);
