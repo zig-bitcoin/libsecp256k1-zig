@@ -89,9 +89,19 @@ pub const Secp256k1 = struct {
         secp256k1.secp256k1_context_preallocated_destroy(self.ctx);
     }
 
+    /// Creates a schnorr signature using the given auxiliary random data.
+    pub fn signSchnorrWithAuxRand(
+        self: *const Secp256k1,
+        msg: [32]u8,
+        keypair: KeyPair,
+        aux_rand: [32]u8,
+    ) !Signature {
+        return try self.signSchnorrHelper(&msg, keypair, &aux_rand);
+    }
+
     /// Verifies a schnorr signature.
     pub fn verifySchnorr(
-        self: *Secp256k1,
+        self: *const Secp256k1,
         sig: Signature,
         msg: [32]u8,
         pubkey: XOnlyPublicKey,
@@ -105,10 +115,10 @@ pub const Secp256k1 = struct {
         ) != 1) return error.InvalidSignature;
     }
 
-    pub fn signSchnorrHelper(self: *const Secp256k1, msg: [32]u8, keypair: KeyPair, nonce_data: []const u8) !Signature {
+    pub fn signSchnorrHelper(self: *const Secp256k1, msg: []const u8, keypair: KeyPair, nonce_data: []const u8) !Signature {
         var sig: [64]u8 = undefined;
 
-        std.debug.assert(1 == secp256k1.secp256k1_schnorrsig_sign(self.ctx, (&sig).ptr, &msg, &keypair.inner, nonce_data.ptr));
+        std.debug.assert(1 == secp256k1.secp256k1_schnorrsig_sign(self.ctx, (&sig).ptr, msg.ptr, &keypair.inner, nonce_data.ptr));
 
         return .{ .inner = sig };
     }
@@ -402,9 +412,7 @@ pub const SecretKey = struct {
 
     /// Generate random [`SecretKey`] with default random
     pub fn generate() SecretKey {
-        var rng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp()));
-
-        return generateWithRandom(rng.random());
+        return generateWithRandom(std.crypto.random);
     }
 
     /// Schnorr Signature on Message
@@ -417,12 +425,10 @@ pub const SecretKey = struct {
         var secp = try Secp256k1.genNew();
         defer secp.deinit();
 
-        var rng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp()));
-
         var aux: [32]u8 = undefined;
-        rng.fill(&aux);
+        std.crypto.random.bytes(&aux);
 
-        return secp.signSchnorrHelper(hash, try KeyPair.fromSecretKey(&secp, self), &aux);
+        return secp.signSchnorrHelper(&hash, try KeyPair.fromSecretKey(&secp, self), &aux);
     }
 
     pub fn fromString(data: []const u8) !@This() {
@@ -506,4 +512,29 @@ pub const SecretKey = struct {
     }
 };
 
-test "test" {}
+test "Secret sign" {
+    const sk = SecretKey.generate();
+    _ = try sk.sign("test_data");
+}
+
+test "Schnorr sign" {
+    const secp = try Secp256k1.genNew();
+    defer secp.deinit();
+
+    const sk = try KeyPair.fromSecretKey(&secp, &try SecretKey.fromString("688C77BC2D5AAFF5491CF309D4753B732135470D05B7B2CD21ADD0744FE97BEF"));
+
+    var buf: [200]u8 = undefined;
+
+    const msg = try std.fmt.hexToBytes(&buf, "E48441762FB75010B2AA31A512B62B4148AA3FB08EB0765D76B252559064A614");
+
+    const aux_rand = try std.fmt.hexToBytes(buf[100..], "02CCE08E913F22A36C5648D6405A2C7C50106E7AA2F1649E381C7F09D16B80AB");
+
+    const expected_sig = try Signature.fromString("6470FD1303DDA4FDA717B9837153C24A6EAB377183FC438F939E0ED2B620E9EE5077C4A8B8DCA28963D772A94F5F0DDF598E1C47C137F91933274C7C3EDADCE8");
+
+    const sig = try secp.signSchnorrWithAuxRand(msg[0..32].*, sk, aux_rand[0..32].*);
+
+    try std.testing.expectEqualDeep(
+        expected_sig,
+        sig,
+    );
+}
