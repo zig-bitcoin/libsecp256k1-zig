@@ -86,7 +86,7 @@ pub const Secp256k1 = struct {
     ctx: ?*secp256k1.struct_secp256k1_context_struct,
 
     pub fn deinit(self: @This()) void {
-        secp256k1.secp256k1_context_preallocated_destroy(self.ctx);
+        secp256k1.secp256k1_context_destroy(self.ctx);
     }
 
     /// Creates a schnorr signature using the given auxiliary random data.
