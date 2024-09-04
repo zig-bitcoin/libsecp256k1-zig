@@ -396,6 +396,11 @@ pub const PublicKey = struct {
         }
     }
 
+    /// Adds public key `self` to public key `other`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidPublicKeySum`] if sum of public keys not valid.
     pub fn combine(self: @This(), other: PublicKey) !PublicKey {
         return PublicKey.combineKeys(&.{
             &self, &other,
@@ -560,6 +565,50 @@ pub const SecretKey = struct {
         };
     }
 };
+
+test "PublicKey combine table test" {
+    const secp = try Secp256k1.genNew();
+    defer secp.deinit();
+
+    // Test vectors stolen from https://web.archive.org/web/20190724010836/https://chuckbatson.wordpress.com/2014/11/26/secp256k1-test-vectors/.
+    const table: [19][]const u8 = .{
+        // [2]G = G + G
+        "04C6047F9441ED7D6D3045406E95C07CD85C778E4B8CEF3CA7ABAC09B95C709EE51AE168FEA63DC339A3C58419466CEAEEF7F632653266D0E1236431A950CFE52A",
+        // [3]G = G + G + G
+        "04f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9388f7b0f632de8140fe337e62a37f3566500a99934c2231b6cb9fd7584b8e672",
+        // ...
+        "04e493dbf1c10d80f3581e4904930b1404cc6c13900ee0758474fa94abe8c4cd1351ed993ea0d455b75642e2098ea51448d967ae33bfbdfe40cfe97bdc47739922",
+        "042f8bde4d1a07209355b4a7250a5c5128e88b84bddc619ab7cba8d569b240efe4d8ac222636e5e3d6d4dba9dda6c9c426f788271bab0d6840dca87d3aa6ac62d6",
+        "04fff97bd5755eeea420453a14355235d382f6472f8568a18b2f057a1460297556ae12777aacfbb620f3be96017f45c560de80f0f6518fe4a03c870c36b075f297",
+        "045cbdf0646e5db4eaa398f365f2ea7a0e3d419b7e0330e39ce92bddedcac4f9bc6aebca40ba255960a3178d6d861a54dba813d0b813fde7b5a5082628087264da",
+        "042f01e5e15cca351daff3843fb70f3c2f0a1bdd05e5af888a67784ef3e10a2a015c4da8a741539949293d082a132d13b4c2e213d6ba5b7617b5da2cb76cbde904",
+        "04acd484e2f0c7f65309ad178a9f559abde09796974c57e714c35f110dfc27ccbecc338921b0a7d9fd64380971763b61e9add888a4375f8e0f05cc262ac64f9c37",
+        "04a0434d9e47f3c86235477c7b1ae6ae5d3442d49b1943c2b752a68e2a47e247c7893aba425419bc27a3b6c7e693a24c696f794c2ed877a1593cbee53b037368d7",
+        "04774ae7f858a9411e5ef4246b70c65aac5649980be5c17891bbec17895da008cbd984a032eb6b5e190243dd56d7b7b365372db1e2dff9d6a8301d74c9c953c61b",
+        "04d01115d548e7561b15c38f004d734633687cf4419620095bc5b0f47070afe85aa9f34ffdc815e0d7a8b64537e17bd81579238c5dd9a86d526b051b13f4062327",
+        "04f28773c2d975288bc7d1d205c3748651b075fbc6610e58cddeeddf8f19405aa80ab0902e8d880a89758212eb65cdaf473a1a06da521fa91f29b5cb52db03ed81",
+        "04499fdf9e895e719cfd64e67f07d38e3226aa7b63678949e6e49b241a60e823e4cac2f6c4b54e855190f044e4a7b3d464464279c27a3f95bcc65f40d403a13f5b",
+        "04d7924d4f7d43ea965a465ae3095ff41131e5946f3c85f79e44adbcf8e27e080e581e2872a86c72a683842ec228cc6defea40af2bd896d3a5c504dc9ff6a26b58",
+        "04e60fce93b59e9ec53011aabc21c23e97b2a31369b87a5ae9c44ee89e2a6dec0af7e3507399e595929db99f34f57937101296891e44d23f0be1f32cce69616821",
+        "04defdea4cdb677750a420fee807eacf21eb9898ae79b9768766e4faa04a2d4a344211ab0694635168e997b0ead2a93daeced1f4a04a95c0f6cfb199f69e56eb77",
+        "045601570cb47f238d2b0286db4a990fa0f3ba28d1a319f5e7cf55c2a2444da7ccc136c1dc0cbeb930e9e298043589351d81d8e0bc736ae2a1f5192e5e8b061d58",
+        "042b4ea0a797a443d293ef5cff444f4979f06acfebd7e86d277475656138385b6c85e89bc037945d93b343083b5a1c86131a01f60c50269763b570c854e5c09b7a",
+        "044ce119c96e2fa357200b559b2f7dd5a5f02d5290aff74b03f3e471b273211c9712ba26dcb10ec1625da61fa10a844c676162948271d96967450288ee9233dc3a",
+    };
+
+    const generator = PublicKey.fromSecretKey(secp, try SecretKey.fromString("0000000000000000000000000000000000000000000000000000000000000001"));
+    var pubkey = generator;
+
+    for (table) |pubkeystr| {
+        pubkey = try pubkey.combine(generator);
+
+        const expected = try PublicKey.fromString(pubkeystr);
+        try std.testing.expectEqualDeep(
+            pubkey,
+            expected,
+        );
+    }
+}
 
 test "Secret sign" {
     const sk = SecretKey.generate();
