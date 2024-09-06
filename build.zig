@@ -73,7 +73,6 @@ pub fn build(b: *std.Build) !void {
     const lib_unit_tests = b.addTest(.{
         .root_source_file = b.path("src/secp256k1.zig"),
         .target = target,
-        .optimize = std.builtin.OptimizeMode.Debug,
     });
     lib_unit_tests.linkLibrary(libsecp256k1);
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
@@ -81,7 +80,6 @@ pub fn build(b: *std.Build) !void {
     const global_tests = b.addTest(.{
         .root_source_file = b.path("src/tests.zig"),
         .target = target,
-        .optimize = std.builtin.OptimizeMode.Debug,
     });
     global_tests.linkLibrary(libsecp256k1);
     const run_global_test = b.addRunArtifact(global_tests);
