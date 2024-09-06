@@ -77,17 +77,17 @@ pub fn build(b: *std.Build) !void {
     lib_unit_tests.linkLibrary(libsecp256k1);
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
-    const global_tests = b.addTest(.{
-        .root_source_file = b.path("src/tests.zig"),
+    const example_tests = b.addTest(.{
+        .root_source_file = b.path("src/examples.zig"),
         .target = target,
     });
-    global_tests.linkLibrary(libsecp256k1);
-    const run_global_test = b.addRunArtifact(global_tests);
+    example_tests.linkLibrary(libsecp256k1);
+    const run_example_test = b.addRunArtifact(example_tests);
 
     // Similar to creating the run step earlier, this exposes a `test` step to
     // the `zig build --help` menu, providing a way for the user to request
     // running the unit tests.
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_lib_unit_tests.step);
-    test_step.dependOn(&run_global_test.step);
+    test_step.dependOn(&run_example_test.step);
 }
