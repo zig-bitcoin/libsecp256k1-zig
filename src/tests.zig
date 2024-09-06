@@ -1,8 +1,10 @@
 const std = @import("std");
-const secp256k1 = @import("secp256k1");
+const secp256k1 = @import("./secp256k1.zig");
+
 const Sha256 = std.crypto.hash.sha2.Sha256;
 const rand = std.crypto.random;
-pub fn generateKeypair() !void {
+
+test "generateKeypair" {
     const secp = try secp256k1.Secp256k1.genNew();
     defer secp.deinit();
 
@@ -19,7 +21,7 @@ pub fn generateKeypair() !void {
     }
 }
 
-pub fn signAndVerifyEcdsa() !void {
+test "signAndVerifyEcdsa" {
     const secp = try secp256k1.Secp256k1.genNew();
     defer secp.deinit();
 
@@ -32,13 +34,4 @@ pub fn signAndVerifyEcdsa() !void {
 
     const signature = try secp.signEcdsa(seckey, messageHash[0..32].*);
     try secp.verifyEcdsa(signature, messageHash[0..32].*, pubkey);
-}
-
-pub fn main() !void {
-
-    // generate key pair example
-    try generateKeypair();
-
-    // ecdsa example
-    try signAndVerifyEcdsa();
 }
