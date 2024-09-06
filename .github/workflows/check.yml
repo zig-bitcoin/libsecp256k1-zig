@@ -43,4 +43,4 @@ jobs:
             ${{ runner.os }}-zig-build-
 
       - name: Unit testing
-        run: zig build test --summary all
+        run: zig build test
