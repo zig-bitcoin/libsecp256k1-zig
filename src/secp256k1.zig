@@ -1,5 +1,16 @@
 const std = @import("std");
 const crypto = std.crypto;
+const constants = @import("constants.zig");
+const ecdsa_lib = @import("ecdsa/ecdsa.zig");
+const schnorr_lib = @import("schnorr.zig");
+
+pub const ecdsa = struct {
+    pub const Signature = ecdsa_lib.Signature;
+};
+
+pub const schnorr = struct {
+    pub const Signature = schnorr_lib.Signature;
+};
 
 const secp256k1 = @cImport({
     @cInclude("secp256k1.h");
@@ -7,6 +18,21 @@ const secp256k1 = @cImport({
     @cInclude("secp256k1_preallocated.h");
     @cInclude("secp256k1_schnorrsig.h");
 });
+
+/// A (hashed) message input to an ECDSA signature.
+pub const Message = struct {
+    inner: [constants.message_size]u8,
+
+    /// Creates a [`Message`] from a `digest`.
+    ///
+    /// The `digest` array has to be a cryptographically secure hash of the actual message that's
+    /// going to be signed. Otherwise the result of signing isn't a [secure signature].
+    ///
+    /// [secure signature]: https://twitter.com/pwuille/status/1063582706288586752
+    pub inline fn fromDigest(digest: [32]u8) Message {
+        return .{ .inner = digest };
+    }
+};
 
 pub const KeyPair = struct {
     inner: secp256k1.secp256k1_keypair,
@@ -20,6 +46,36 @@ pub const KeyPair = struct {
         }
 
         return .{ .inner = kp };
+    }
+
+    /// Creates a [`KeyPair`] directly from a secret key string.
+    ///
+    /// # Errors
+    ///
+    /// [`error.InvalidSecretKey`] if corresponding public key for the provided secret key is not even.
+    pub fn fromSeckeyStr(secp: *const Secp256k1, s: []const u8) !KeyPair {
+        if (s.len / 2 > constants.secret_key_size) return error.InvalidSecretKey;
+        var res = [_]u8{0} ** constants.secret_key_size;
+
+        return try fromSeckeySlice(secp, std.fmt.hexToBytes(&res, s) catch return error.InvalidSecretKey);
+    }
+
+    pub fn fromSeckeySlice(
+        secp: *const Secp256k1,
+        data: []const u8,
+    ) !KeyPair {
+        if (data.len == 0 or data.len != constants.secret_key_size) {
+            return error.InvalidSecretKey;
+        }
+
+        var kp = secp256k1.secp256k1_keypair{};
+        if (secp256k1.secp256k1_keypair_create(secp.ctx, &kp, data.ptr) == 1) {
+            return .{
+                .inner = kp,
+            };
+        } else {
+            return error.InvalidSecretKey;
+        }
     }
 };
 
@@ -89,39 +145,8 @@ pub const Secp256k1 = struct {
         secp256k1.secp256k1_context_destroy(self.ctx);
     }
 
-    /// Creates a schnorr signature using the given auxiliary random data.
-    pub fn signSchnorrWithAuxRand(
-        self: *const Secp256k1,
-        msg: [32]u8,
-        keypair: KeyPair,
-        aux_rand: [32]u8,
-    ) !Signature {
-        return try self.signSchnorrHelper(&msg, keypair, &aux_rand);
-    }
-
-    /// Verifies a schnorr signature.
-    pub fn verifySchnorr(
-        self: *const Secp256k1,
-        sig: Signature,
-        msg: [32]u8,
-        pubkey: XOnlyPublicKey,
-    ) !void {
-        if (secp256k1.secp256k1_schnorrsig_verify(
-            self.ctx,
-            &sig.inner,
-            &msg,
-            32,
-            &pubkey.inner,
-        ) != 1) return error.InvalidSignature;
-    }
-
-    pub fn signSchnorrHelper(self: *const Secp256k1, msg: []const u8, keypair: KeyPair, nonce_data: []const u8) !Signature {
-        var sig: [64]u8 = undefined;
-
-        std.debug.assert(1 == secp256k1.secp256k1_schnorrsig_sign(self.ctx, (&sig).ptr, msg.ptr, &keypair.inner, nonce_data.ptr));
-
-        return .{ .inner = sig };
-    }
+    pub usingnamespace ecdsa_lib.Secp;
+    pub usingnamespace schnorr_lib.Secp;
 
     /// Creating new [`Secp256k1`] object, after all u need to call DEINIT
     pub fn genNew() !@This() {
@@ -149,44 +174,6 @@ pub const Secp256k1 = struct {
         const sk = SecretKey.generateWithRandom(rng);
         const pk = PublicKey.fromSecretKey(self, sk);
         return .{ sk, pk };
-    }
-
-    pub fn signEcdsa(
-        self: Secp256k1,
-        sk: SecretKey,
-        msghash32: [32]u8,
-    ) !Signature {
-        var sig = secp256k1.secp256k1_ecdsa_signature{};
-
-        if (secp256k1.secp256k1_ecdsa_sign(
-            self.ctx,
-            &sig,
-            &msghash32,
-            &sk.data,
-            null,
-            null,
-        ) != 1) {
-            return error.SigningFailed;
-        }
-
-        var compact_sig: [64]u8 = undefined;
-        if (secp256k1.secp256k1_ecdsa_signature_serialize_compact(self.ctx, &compact_sig, &sig) != 1) {
-            return error.SerializationFailed;
-        }
-
-        return Signature{ .inner = compact_sig };
-    }
-
-    pub fn verifyEcdsa(
-        self: Secp256k1,
-        sig: Signature,
-        msghash32: [32]u8,
-        pk: PublicKey,
-    ) !void {
-        const ecdsa_sig = sig.secp256k1_ecdsa_signature();
-        if (secp256k1.secp256k1_ecdsa_verify(self.ctx, &ecdsa_sig, &msghash32, &pk.pk) != 1) {
-            return error.InvalidSignature;
-        }
     }
 };
 
@@ -299,7 +286,7 @@ pub const PublicKey = struct {
     }
 
     /// Verify schnorr signature
-    pub fn verify(self: *const PublicKey, secp: *Secp256k1, msg: []const u8, sig: Signature) !void {
+    pub fn verify(self: *const PublicKey, secp: *Secp256k1, msg: []const u8, sig: schnorr_lib.Signature) !void {
         var hasher = crypto.hash.sha2.Sha256.init(.{});
         hasher.update(msg);
 
@@ -424,33 +411,6 @@ pub const PublicKey = struct {
     }
 };
 
-pub const Signature = struct {
-    inner: [64]u8,
-
-    pub fn fromString(s: []const u8) !Signature {
-        if (s.len / 2 > 64) return error.InvalidSignature;
-        var res = [_]u8{0} ** 64;
-
-        _ = try std.fmt.hexToBytes(&res, s);
-        return .{ .inner = res };
-    }
-
-    pub fn toString(self: Signature) [128]u8 {
-        return std.fmt.bytesToHex(&self.inner, .lower);
-    }
-
-    pub fn secp256k1_ecdsa_signature(self: Signature) secp256k1.secp256k1_ecdsa_signature {
-        var sig = secp256k1.secp256k1_ecdsa_signature{};
-        std.debug.assert(1 == secp256k1.secp256k1_ecdsa_signature_parse_compact(
-            secp256k1.secp256k1_context_no_precomp,
-            &sig,
-            &self.inner,
-        ));
-
-        return sig;
-    }
-};
-
 pub const SecretKey = struct {
     data: [32]u8,
 
@@ -470,7 +430,7 @@ pub const SecretKey = struct {
     }
 
     /// Schnorr Signature on Message
-    pub fn sign(self: *const SecretKey, msg: []const u8) !Signature {
+    pub fn sign(self: *const SecretKey, msg: []const u8) !schnorr_lib.Signature {
         var hasher = crypto.hash.sha2.Sha256.init(.{});
         hasher.update(msg);
 
@@ -619,7 +579,7 @@ test "Schnorr sign" {
     const secp = try Secp256k1.genNew();
     defer secp.deinit();
 
-    const sk = try KeyPair.fromSecretKey(&secp, &try SecretKey.fromString("688C77BC2D5AAFF5491CF309D4753B732135470D05B7B2CD21ADD0744FE97BEF"));
+    const sk = try KeyPair.fromSeckeyStr(&secp, "688C77BC2D5AAFF5491CF309D4753B732135470D05B7B2CD21ADD0744FE97BEF");
 
     var buf: [200]u8 = undefined;
 
@@ -627,7 +587,7 @@ test "Schnorr sign" {
 
     const aux_rand = try std.fmt.hexToBytes(buf[100..], "02CCE08E913F22A36C5648D6405A2C7C50106E7AA2F1649E381C7F09D16B80AB");
 
-    const expected_sig = try Signature.fromString("6470FD1303DDA4FDA717B9837153C24A6EAB377183FC438F939E0ED2B620E9EE5077C4A8B8DCA28963D772A94F5F0DDF598E1C47C137F91933274C7C3EDADCE8");
+    const expected_sig = try schnorr_lib.Signature.fromStr("6470FD1303DDA4FDA717B9837153C24A6EAB377183FC438F939E0ED2B620E9EE5077C4A8B8DCA28963D772A94F5F0DDF598E1C47C137F91933274C7C3EDADCE8");
 
     const sig = try secp.signSchnorrWithAuxRand(msg[0..32].*, sk, aux_rand[0..32].*);
 
@@ -649,7 +609,7 @@ test "ECDSA verify" {
     // zig bitcoin
     const msg = try std.fmt.hexToBytes(&buf, "D95F5DB92F175E6489219D1B23B3EFBF0D353DED9224DCD4B9AF3F3CB983469B");
 
-    const sig = try secp.signEcdsa(privKey, msg[0..32].*);
+    const sig = secp.signEcdsa(.{ .inner = msg[0..32].* }, privKey);
 
-    try secp.verifyEcdsa(sig, msg[0..32].*, pubKey);
+    try secp.verifyEcdsa(.{ .inner = msg[0..32].* }, sig, pubKey);
 }
