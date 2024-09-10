@@ -291,7 +291,7 @@ pub const PublicKey = struct {
 
         const hash = hasher.finalResult();
 
-        try secp.verifySchnorr(sig, hash, (try self.xOnlyPublicKey())[0]);
+        try secp.verifySchnorr(sig, hash, self.xOnlyPublicKey()[0]);
     }
 
     /// [`PublicKey`] from hex string
