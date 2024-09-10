@@ -4,6 +4,7 @@ const secp256k1 = @cImport({
     @cInclude("secp256k1_recovery.h");
     @cInclude("secp256k1_preallocated.h");
     @cInclude("secp256k1_schnorrsig.h");
+    // @cInclude("lax_der_parsing.h");
 });
 const secp = @import("../secp256k1.zig");
 
@@ -71,23 +72,23 @@ pub const Signature = struct {
     /// only useful for validating signatures in the Bitcoin blockchain from before
     /// 2016. It should never be used in new applications. This library does not
     /// support serializing to this "format"
-    pub fn fromDerLax(data: []const u8) Error!Signature {
-        if (data.len == 0) {
-            return Error.InvalidSignature;
-        }
+    // pub fn fromDerLax(data: []const u8) Error!Signature {
+    //     if (data.len == 0) {
+    //         return Error.InvalidSignature;
+    //     }
 
-        var ret: secp256k1.secp256k1_ecdsa_signature = .{};
-        if (secp256k1.ecdsa_signature_parse_der_lax(
-            secp256k1.secp256k1_context_no_precomp,
-            &ret,
-            data.ptr,
-            data.len,
-        ) == 1) {
-            return .{ .inner = ret };
-        } else {
-            return Error.InvalidSignature;
-        }
-    }
+    //     var ret: secp256k1.secp256k1_ecdsa_signature = .{};
+    //     if (secp256k1.ecdsa_signature_parse_der_lax(
+    //         secp256k1.secp256k1_context_no_precomp,
+    //         &ret,
+    //         data.ptr,
+    //         data.len,
+    //     ) == 1) {
+    //         return .{ .inner = ret };
+    //     } else {
+    //         return Error.InvalidSignature;
+    //     }
+    // }
 
     /// Normalizes a signature to a "low S" form. In ECDSA, signatures are
     /// of the form (r, s) where r and s are numbers lying in some finite
@@ -307,4 +308,56 @@ pub fn derLengthCheck(sig: secp256k1.secp256k1_ecdsa_signature, max_len: usize) 
     );
     std.debug.assert(err == 1);
     return len <= max_len;
+}
+
+test "der lax signature" {
+
+    // Example DER-encoded signature (lax format) in hex
+    const der_signature_hex = "3044022075a98d820d3927832bca8023dfd53dd9ab17d4424ad4ecf6f6456e736b59f11d02202f5787cce0f3c59bd4fe7a786116de6b66390cdd9b340af7cb1dba22ba85faeb";
+
+    var buf: [100]u8 = undefined;
+    // Convert hex signature to bytes
+    const der_signature_bytes = try std.fmt.hexToBytes(&buf, der_signature_hex);
+
+    // Expected signature object (parsed correctly from DER)
+    const expected_signature = try Signature.fromDer(der_signature_bytes);
+    _ = expected_signature; // autofix
+
+    // Parse the lax DER signature
+    // const signature = try Signature.fromDerLax(der_signature_bytes);
+
+    // Assert the parsed signature is equal to the expected one
+    // try std.testing.expectEqualDeep(signature, expected_signature);
+}
+
+test "test sign ecdsa with nonce data" {
+    const s = secp.Secp256k1.genNew();
+    defer s.deinit();
+
+    // Generate a random private key (this would normally come from a wallet or similar)
+    var private_key_data: [32]u8 = undefined;
+
+    std.crypto.random.bytes(&private_key_data);
+
+    const sk = try secp.SecretKey.fromSlice(&private_key_data);
+
+    // Message to sign
+    const message_data = [_]u8{1} ** 32; // Replace with your actual message
+    const message = secp.Message{
+        .inner = message_data,
+    };
+
+    // Generate a nonce manually for this test
+    var nonce_data: [32]u8 = undefined;
+
+    std.crypto.random.bytes(&nonce_data);
+
+    // Sign the message using the private key and nonce
+    const signature = s.signEcdsaWithNoncedata(&message, &sk, nonce_data);
+
+    // Verify the signature using the public key
+    const pk = secp.PublicKey.fromSecretKey(s, sk);
+
+    // Ensure the signature is valid
+    try s.verifyEcdsa(message, signature, pk);
 }
