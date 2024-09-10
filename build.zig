@@ -10,6 +10,7 @@ fn buildSecp256k1(libsecp_c: *std.Build.Dependency, b: *std.Build, target: std.B
 
     lib.addIncludePath(libsecp_c.path(""));
     lib.addIncludePath(libsecp_c.path("src"));
+    lib.addIncludePath(libsecp_c.path("include"));
 
     var flags = std.ArrayList([]const u8).init(b.allocator);
     defer flags.deinit();
@@ -19,7 +20,15 @@ fn buildSecp256k1(libsecp_c: *std.Build.Dependency, b: *std.Build, target: std.B
     try flags.appendSlice(&.{"-DENABLE_MODULE_ECDH=1"});
     try flags.appendSlice(&.{"-DENABLE_MODULE_EXTRAKEYS=1"});
 
-    lib.addCSourceFiles(.{ .root = libsecp_c.path(""), .flags = flags.items, .files = &.{ "./src/secp256k1.c", "./src/precomputed_ecmult.c", "./src/precomputed_ecmult_gen.c" } });
+    lib.addCSourceFiles(.{
+        .root = libsecp_c.path(""),
+        .flags = flags.items,
+        .files = &.{
+            "./src/secp256k1.c",
+            "./src/precomputed_ecmult.c",
+            "./src/precomputed_ecmult_gen.c",
+        },
+    });
     lib.defineCMacro("USE_FIELD_10X26", "1");
     lib.defineCMacro("USE_SCALAR_8X32", "1");
     lib.defineCMacro("USE_ENDOMORPHISM", "1");
