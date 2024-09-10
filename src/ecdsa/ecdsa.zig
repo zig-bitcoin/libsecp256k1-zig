@@ -336,19 +336,3 @@ test "test sign ecdsa with nonce data" {
     // Ensure the signature is valid
     try s.verifyEcdsa(message, signature, pk);
 }
-
-// Slow search, so we dont need to include it
-// test "test sign ecdsa grind r" {
-//     const s = secp.Secp256k1.genNew();
-
-//     const msg = secp.Message.fromDigest([_]u8{0xab} ** 32);
-//     const sk = try secp.SecretKey.fromSlice(&[_]u8{0xcd} ** 32);
-//     const bytes_to_grind = 10;
-
-//     const signature = s.signEcdsaGrindR(msg, sk, bytes_to_grind);
-
-//     // Check if the signature length is less than 71 - bytes_to_grind
-//     const der_signature = signature.serializeDer();
-
-//     try std.testing.expect(der_signature.len < 71 - bytes_to_grind);
-// }
