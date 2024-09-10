@@ -9,13 +9,16 @@ const secp = @import("../secp256k1.zig");
 
 const serialized_signature = @import("serialized_signature.zig");
 const SerializedSignature = @import("serialized_signature.zig").SerializedSignature;
+const Error = secp.Error;
+const ErrorParseHex = secp.ErrorParseHex;
 
 /// An ECDSA signature
 pub const Signature = struct {
     inner: secp256k1.secp256k1_ecdsa_signature,
 
-    pub fn fromString(s: []const u8) !Signature {
+    pub fn fromString(s: []const u8) (Error || ErrorParseHex)!Signature {
         if (s.len / 2 > serialized_signature.MAX_LEN) return error.InvalidSignature;
+
         var res = [_]u8{0} ** serialized_signature.MAX_LEN;
 
         return try fromDer(try std.fmt.hexToBytes(&res, s));
@@ -26,9 +29,9 @@ pub const Signature = struct {
     }
 
     /// Converts a DER-encoded byte slice to a signature
-    pub fn fromDer(data: []const u8) !Signature {
+    pub fn fromDer(data: []const u8) Error!Signature {
         if (data.len == 0) {
-            return error.InvalidSignature;
+            return Error.InvalidSignature;
         }
 
         var ret: secp256k1.secp256k1_ecdsa_signature = .{};
@@ -42,14 +45,14 @@ pub const Signature = struct {
                 .inner = ret,
             };
         } else {
-            return error.InvalidSignature;
+            return Error.InvalidSignature;
         }
     }
 
     /// Converts a 64-byte compact-encoded byte slice to a signature
-    pub fn fromCompact(data: []const u8) !Signature {
+    pub fn fromCompact(data: []const u8) Error!Signature {
         if (data.len != 64) {
-            return error.InvalidSignature;
+            return Error.InvalidSignature;
         }
         var ret: secp256k1.secp256k1_ecdsa_signature = .{};
 
@@ -60,7 +63,7 @@ pub const Signature = struct {
         ) == 1) {
             return .{ .inner = ret };
         } else {
-            return error.InvalidSignature;
+            return Error.InvalidSignature;
         }
     }
 
@@ -68,9 +71,9 @@ pub const Signature = struct {
     /// only useful for validating signatures in the Bitcoin blockchain from before
     /// 2016. It should never be used in new applications. This library does not
     /// support serializing to this "format"
-    pub fn fromDerLax(data: []const u8) !Signature {
+    pub fn fromDerLax(data: []const u8) Error!Signature {
         if (data.len == 0) {
-            return error.InvalidSignature;
+            return Error.InvalidSignature;
         }
 
         var ret: secp256k1.secp256k1_ecdsa_signature = .{};
@@ -82,7 +85,7 @@ pub const Signature = struct {
         ) == 1) {
             return .{ .inner = ret };
         } else {
-            return error.InvalidSignature;
+            return Error.InvalidSignature;
         }
     }
 
@@ -147,9 +150,9 @@ pub const Signature = struct {
 
 pub const Secp = struct {
     fn signEcdsaWithNoncedataPointer(
-        self: secp.Secp256k1,
-        msg: secp.Message,
-        sk: secp.SecretKey,
+        self: *const secp.Secp256k1,
+        msg: *const secp.Message,
+        sk: *const secp.SecretKey,
         noncedata: ?[32]u8,
     ) Signature {
         var ret: secp256k1.secp256k1_ecdsa_signature = .{};
@@ -174,7 +177,7 @@ pub const Secp = struct {
 
     /// Constructs a signature for `msg` using the secret key `sk` and RFC6979 nonce
     /// Requires a signing-capable context.
-    pub fn signEcdsa(self: secp.Secp256k1, msg: secp.Message, sk: secp.SecretKey) Signature {
+    pub fn signEcdsa(self: *const secp.Secp256k1, msg: *const secp.Message, sk: *const secp.SecretKey) Signature {
         return signEcdsaWithNoncedataPointer(self, msg, sk, null);
     }
 
@@ -184,9 +187,9 @@ pub const Secp = struct {
     /// signatures are needed for the same Message and SecretKey while still using RFC6979.
     /// Requires a signing-capable context.
     pub fn signEcdsaWithNoncedata(
-        self: secp.Secp256k1,
-        msg: secp.Message,
-        sk: secp.SecretKey,
+        self: *const secp.Secp256k1,
+        msg: *const secp.Message,
+        sk: *const secp.SecretKey,
         noncedata: [32]u8,
     ) Signature {
         return signEcdsaWithNoncedataPointer(self, msg, sk, noncedata);
@@ -273,9 +276,9 @@ pub const Secp = struct {
         msg: secp.Message,
         sig: Signature,
         pk: secp.PublicKey,
-    ) !void {
+    ) Error!void {
         if (secp256k1.secp256k1_ecdsa_verify(self.ctx, &sig.inner, &msg.inner, &pk.pk) != 1) {
-            return error.InvalidSignature;
+            return Error.IncorrectSignature;
         }
     }
 };

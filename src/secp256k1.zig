@@ -2,7 +2,39 @@ const std = @import("std");
 const crypto = std.crypto;
 const constants = @import("constants.zig");
 const ecdsa_lib = @import("ecdsa/ecdsa.zig");
+const recovery_lib = @import("ecdsa/recovery.zig");
 const schnorr_lib = @import("schnorr.zig");
+
+/// The main error type for this library.
+pub const Error = error{
+    /// Signature failed verification.
+    IncorrectSignature,
+    /// Bad sized message ("messages" are actually fixed-sized digests [`constants::MESSAGE_SIZE`]).
+    InvalidMessage,
+    /// Bad public key.
+    InvalidPublicKey,
+    /// Bad signature.
+    InvalidSignature,
+    /// Bad secret key.
+    InvalidSecretKey,
+    /// Bad shared secret.
+    InvalidSharedSecret,
+    /// Bad recovery id.
+    InvalidRecoveryId,
+    /// Tried to add/multiply by an invalid tweak.
+    InvalidTweak,
+    /// Didn't pass enough memory to context creation with preallocated memory.
+    NotEnoughMemory,
+    /// Bad set of public keys.
+    InvalidPublicKeySum,
+    /// The only valid parity values are 0 or 1.
+    InvalidParityValue,
+    /// Bad EllSwift value
+    InvalidEllSwift,
+
+    // allocator error
+    OutOfMemory,
+};
 
 pub const ecdsa = struct {
     pub const Signature = ecdsa_lib.Signature;
@@ -38,7 +70,7 @@ pub const KeyPair = struct {
     inner: secp256k1.secp256k1_keypair,
 
     /// Creates a [`KeyPair`] directly from a Secp256k1 secret key.
-    pub fn fromSecretKey(secp: *const Secp256k1, sk: *const SecretKey) !KeyPair {
+    pub fn fromSecretKey(secp: *const Secp256k1, sk: *const SecretKey) Error!KeyPair {
         var kp = secp256k1.secp256k1_keypair{};
 
         if (secp256k1.secp256k1_keypair_create(secp.ctx, &kp, &sk.data) != 1) {
@@ -53,19 +85,19 @@ pub const KeyPair = struct {
     /// # Errors
     ///
     /// [`error.InvalidSecretKey`] if corresponding public key for the provided secret key is not even.
-    pub fn fromSeckeyStr(secp: *const Secp256k1, s: []const u8) !KeyPair {
-        if (s.len / 2 > constants.secret_key_size) return error.InvalidSecretKey;
+    pub fn fromSeckeyStr(secp: *const Secp256k1, s: []const u8) Error!KeyPair {
+        if (s.len / 2 > constants.secret_key_size) return Error.InvalidSecretKey;
         var res = [_]u8{0} ** constants.secret_key_size;
 
-        return try fromSeckeySlice(secp, std.fmt.hexToBytes(&res, s) catch return error.InvalidSecretKey);
+        return try fromSeckeySlice(secp, std.fmt.hexToBytes(&res, s) catch return Error.InvalidSecretKey);
     }
 
     pub fn fromSeckeySlice(
         secp: *const Secp256k1,
         data: []const u8,
-    ) !KeyPair {
+    ) Error!KeyPair {
         if (data.len == 0 or data.len != constants.secret_key_size) {
-            return error.InvalidSecretKey;
+            return Error.InvalidSecretKey;
         }
 
         var kp = secp256k1.secp256k1_keypair{};
@@ -74,7 +106,7 @@ pub const KeyPair = struct {
                 .inner = kp,
             };
         } else {
-            return error.InvalidSecretKey;
+            return Error.InvalidSecretKey;
         }
     }
 };
@@ -88,9 +120,9 @@ pub const XOnlyPublicKey = struct {
     ///
     /// Returns [`Error::InvalidPublicKey`] if the length of the data slice is not 32 bytes or the
     /// slice does not represent a valid Secp256k1 point x coordinate.
-    pub inline fn fromSlice(data: []const u8) !XOnlyPublicKey {
+    pub inline fn fromSlice(data: []const u8) Error!XOnlyPublicKey {
         if (data.len == 0 or data.len != 32) {
-            return error.InvalidPublicKey;
+            return Error.InvalidPublicKey;
         }
 
         var pk: secp256k1.secp256k1_xonly_pubkey = undefined;
@@ -103,7 +135,7 @@ pub const XOnlyPublicKey = struct {
             return .{ .inner = pk };
         }
 
-        return error.InvalidPublicKey;
+        return Error.InvalidPublicKey;
     }
 
     /// Serializes the key as a byte-encoded x coordinate value (32 bytes).
@@ -123,7 +155,7 @@ pub const XOnlyPublicKey = struct {
     pub fn publicKey(pk: XOnlyPublicKey, parity: enum {
         even,
         odd,
-    }) !PublicKey {
+    }) PublicKey {
         var buf: [33]u8 = undefined;
 
         // First byte of a compressed key should be `0x02 AND parity`.
@@ -147,9 +179,10 @@ pub const Secp256k1 = struct {
 
     pub usingnamespace ecdsa_lib.Secp;
     pub usingnamespace schnorr_lib.Secp;
+    pub usingnamespace recovery_lib.Secp;
 
     /// Creating new [`Secp256k1`] object, after all u need to call DEINIT
-    pub fn genNew() !@This() {
+    pub fn genNew() @This() {
         const ctx =
             secp256k1.secp256k1_context_create(257 | 513);
 
@@ -165,71 +198,31 @@ pub const Secp256k1 = struct {
         };
     }
 
+    /// (Re)randomizes the Secp256k1 context for extra sidechannel resistance given 32 bytes of
+    /// cryptographically-secure random data;
+    /// see comment in libsecp256k1 commit d2275795f by Gregory Maxwell.
+    pub fn seededRandomize(self: *const Secp256k1, seed: [32]u8) void {
+        const err = secp256k1.secp256k1_context_randomize(self.ctx, &seed);
+        // This function cannot fail; it has an error return for future-proofing.
+        // We do not expose this error since it is impossible to hit, and we have
+        // precedent for not exposing impossible errors (for example in
+        // `PublicKey::from_secret_key` where it is impossible to create an invalid
+        // secret key through the API.)
+        // However, if this DOES fail, the result is potentially weaker side-channel
+        // resistance, which is deadly and undetectable, so we take out the entire
+        // thread to be on the safe side.
+        std.debug.assert(err == 1);
+    }
+
     /// Generates a random keypair. Convenience function for [`SecretKey::new`] and
     /// [`PublicKey.fromSecretKey`].
     pub inline fn generateKeypair(
         self: Secp256k1,
         rng: std.Random,
-    ) !struct { SecretKey, PublicKey } {
+    ) struct { SecretKey, PublicKey } {
         const sk = SecretKey.generateWithRandom(rng);
         const pk = PublicKey.fromSecretKey(self, sk);
         return .{ sk, pk };
-    }
-};
-
-/// A tag used for recovering the public key from a compact signature.
-pub const RecoveryId = struct {
-    value: i32,
-
-    /// Allows library users to create valid recovery IDs from i32.
-    pub fn fromI32(id: i32) !RecoveryId {
-        return switch (id) {
-            0...3 => .{ .value = id },
-            else => error.InvalidRecoveryId,
-        };
-    }
-
-    pub fn toI32(self: RecoveryId) i32 {
-        return self.value;
-    }
-};
-
-/// An ECDSA signature with a recovery ID for pubkey recovery.
-pub const RecoverableSignature = struct {
-    sig: secp256k1.secp256k1_ecdsa_recoverable_signature,
-
-    /// Converts a compact-encoded byte slice to a signature. This
-    /// representation is nonstandard and defined by the libsecp256k1 library.
-    pub fn fromCompact(data: []const u8, recid: RecoveryId) !RecoverableSignature {
-        if (data.len == 0) {
-            return error.InvalidSignature;
-        }
-
-        var ret = secp256k1.secp256k1_ecdsa_recoverable_signature{};
-
-        if (data.len != 64) {
-            return error.InvalidSignature;
-        } else if (secp256k1.secp256k1_ecdsa_recoverable_signature_parse_compact(
-            secp256k1.secp256k1_context_no_precomp,
-            &ret,
-            data.ptr,
-            recid.value,
-        ) == 1) {
-            return .{ .sig = ret };
-        } else {
-            return error.InvalidSignature;
-        }
-    }
-
-    /// Serializes the recoverable signature in compact format.
-    pub fn serializeCompact(self: RecoverableSignature) !struct { RecoveryId, [64]u8 } {
-        var ret = [_]u8{0} ** 64;
-        var recid: i32 = 0;
-
-        const err = secp256k1.secp256k1_ecdsa_recoverable_signature_serialize_compact(secp256k1.secp256k1_context_no_precomp, &ret, &recid, &self.sig);
-        std.debug.assert(err == 1);
-
-        return .{ .{ .value = recid }, ret };
     }
 };
 
@@ -241,6 +234,12 @@ pub const Scalar = struct {
     }
 };
 
+pub const ErrorParseHex = error{
+    InvalidLength,
+    NoSpaceLeft,
+    InvalidCharacter,
+};
+
 pub const PublicKey = struct {
     pk: secp256k1.secp256k1_pubkey,
 
@@ -249,11 +248,11 @@ pub const PublicKey = struct {
     }
 
     // json serializing func
-    pub fn jsonStringify(self: PublicKey, out: anytype) !void {
+    pub fn jsonStringify(self: PublicKey, out: anytype) (Error || std.json.Error)!void {
         try out.write(std.fmt.bytesToHex(&self.serialize(), .lower));
     }
 
-    pub fn jsonParse(_: std.mem.Allocator, source: anytype, _: std.json.ParseOptions) !@This() {
+    pub fn jsonParse(_: std.mem.Allocator, source: anytype, _: std.json.ParseOptions) std.json.Error!@This() {
         switch (try source.next()) {
             .string => |s| {
                 var hex_buffer: [60]u8 = undefined;
@@ -267,7 +266,7 @@ pub const PublicKey = struct {
     }
 
     /// Returns the [`XOnlyPublicKey`] (and it's [`Parity`]) for this [`PublicKey`].
-    pub inline fn xOnlyPublicKey(self: *const PublicKey) !struct { XOnlyPublicKey, enum { even, odd } } {
+    pub inline fn xOnlyPublicKey(self: *const PublicKey) struct { XOnlyPublicKey, enum { even, odd } } {
         var pk_parity: i32 = 0;
         var xonly_pk = secp256k1.secp256k1_xonly_pubkey{};
         const ret = secp256k1.secp256k1_xonly_pubkey_from_pubkey(
@@ -296,21 +295,21 @@ pub const PublicKey = struct {
     }
 
     /// [`PublicKey`] from hex string
-    pub fn fromString(s: []const u8) !@This() {
+    pub fn fromString(s: []const u8) (ErrorParseHex || Error)!@This() {
         var buf: [100]u8 = undefined;
         const decoded = try std.fmt.hexToBytes(&buf, s);
 
-        return PublicKey.fromSlice(decoded);
+        return try PublicKey.fromSlice(decoded);
     }
 
     /// [`PublicKey`] from bytes slice
-    pub fn fromSlice(c: []const u8) !@This() {
+    pub fn fromSlice(c: []const u8) Error!@This() {
         var pk: secp256k1.secp256k1_pubkey = .{};
 
         if (secp256k1.secp256k1_ec_pubkey_parse(secp256k1.secp256k1_context_no_precomp, &pk, c.ptr, c.len) == 1) {
             return .{ .pk = pk };
         }
-        return error.InvalidPublicKey;
+        return Error.InvalidPublicKey;
     }
 
     pub fn fromSecretKey(secp_: Secp256k1, sk: SecretKey) PublicKey {
@@ -374,12 +373,12 @@ pub const PublicKey = struct {
         self: *const PublicKey,
         secp: Secp256k1,
         tweak: Scalar,
-    ) !PublicKey {
+    ) Error!PublicKey {
         var s = self.*;
         if (secp256k1.secp256k1_ec_pubkey_tweak_add(secp.ctx, &s.pk, &tweak.data) == 1) {
             return s;
         } else {
-            return error.InvalidTweak;
+            return Error.InvalidTweak;
         }
     }
 
@@ -388,13 +387,13 @@ pub const PublicKey = struct {
     /// # Errors
     ///
     /// Returns [`InvalidPublicKeySum`] if sum of public keys not valid.
-    pub fn combine(self: @This(), other: PublicKey) !PublicKey {
-        return PublicKey.combineKeys(&.{
+    pub fn combine(self: @This(), other: PublicKey) Error!PublicKey {
+        return try PublicKey.combineKeys(&.{
             &self, &other,
         });
     }
 
-    pub fn combineKeys(keys: []const *const PublicKey) !PublicKey {
+    pub fn combineKeys(keys: []const *const PublicKey) Error!PublicKey {
         if (keys.len == 0) return error.InvalidPublicKeySum;
 
         var ret = PublicKey{
@@ -403,7 +402,7 @@ pub const PublicKey = struct {
 
         if (secp256k1.secp256k1_ec_pubkey_combine(secp256k1.secp256k1_context_no_precomp, &ret.pk, @ptrCast(keys.ptr), keys.len) == 1) return ret;
 
-        return error.InvalidPublicKeySum;
+        return Error.InvalidPublicKeySum;
     }
 
     pub fn toString(self: @This()) [33 * 2]u8 {
@@ -413,6 +412,22 @@ pub const PublicKey = struct {
 
 pub const SecretKey = struct {
     data: [32]u8,
+
+    /// Schnorr Signature on Message
+    pub fn sign(self: *const SecretKey, msg: []const u8) !schnorr_lib.Signature {
+        var hasher = crypto.hash.sha2.Sha256.init(.{});
+        hasher.update(msg);
+
+        const hash = hasher.finalResult();
+
+        var secp = Secp256k1.genNew();
+        defer secp.deinit();
+
+        var aux: [32]u8 = undefined;
+        std.crypto.random.bytes(&aux);
+
+        return secp.signSchnorrHelper(&hash, try KeyPair.fromSecretKey(&secp, self), &aux);
+    }
 
     /// Generate random [`SecretKey`] with default custom random engine
     pub fn generateWithRandom(rng: std.Random) SecretKey {
@@ -429,37 +444,21 @@ pub const SecretKey = struct {
         return generateWithRandom(std.crypto.random);
     }
 
-    /// Schnorr Signature on Message
-    pub fn sign(self: *const SecretKey, msg: []const u8) !schnorr_lib.Signature {
-        var hasher = crypto.hash.sha2.Sha256.init(.{});
-        hasher.update(msg);
-
-        const hash = hasher.finalResult();
-
-        var secp = try Secp256k1.genNew();
-        defer secp.deinit();
-
-        var aux: [32]u8 = undefined;
-        std.crypto.random.bytes(&aux);
-
-        return secp.signSchnorrHelper(&hash, try KeyPair.fromSecretKey(&secp, self), &aux);
-    }
-
-    pub fn fromString(data: []const u8) !@This() {
+    pub fn fromString(data: []const u8) (Error || ErrorParseHex)!@This() {
         var buf: [100]u8 = undefined;
 
-        return SecretKey.fromSlice(try std.fmt.hexToBytes(&buf, data));
+        return try SecretKey.fromSlice(try std.fmt.hexToBytes(&buf, data));
     }
 
-    pub fn fromSlice(data: []const u8) !@This() {
+    pub fn fromSlice(data: []const u8) Error!@This() {
         if (data.len != 32) {
-            return error.InvalidSecretKey;
+            return Error.InvalidSecretKey;
         }
 
         if (secp256k1.secp256k1_ec_seckey_verify(
             secp256k1.secp256k1_context_no_precomp,
             @ptrCast(data.ptr),
-        ) == 0) return error.InvalidSecretKey;
+        ) == 0) return Error.InvalidSecretKey;
 
         return .{
             .data = data[0..32].*,
@@ -483,14 +482,14 @@ pub const SecretKey = struct {
     /// # Errors
     ///
     /// Returns an error if the resulting key would be invalid.
-    pub inline fn mulTweak(self: *const SecretKey, tweak: Scalar) !SecretKey {
+    pub inline fn mulTweak(self: *const SecretKey, tweak: Scalar) Error!SecretKey {
         var s = self.*;
         if (secp256k1.secp256k1_ec_seckey_tweak_mul(
             secp256k1.secp256k1_context_no_precomp,
             &s.data,
             &tweak.data,
         ) != 1) {
-            return error.InvalidTweak;
+            return Error.InvalidTweak;
         }
 
         return s;
@@ -501,24 +500,24 @@ pub const SecretKey = struct {
     /// # Errors
     ///
     /// Returns an error if the resulting key would be invalid.
-    pub inline fn addTweak(self: *const SecretKey, tweak: Scalar) !SecretKey {
+    pub inline fn addTweak(self: *const SecretKey, tweak: Scalar) Error!SecretKey {
         var s = self.*;
         if (secp256k1.secp256k1_ec_seckey_tweak_add(
             secp256k1.secp256k1_context_no_precomp,
             &s.data,
             &tweak.data,
         ) != 1) {
-            return error.InvalidTweak;
+            return Error.InvalidTweak;
         } else {
             return s;
         }
     }
 
-    pub fn jsonStringify(self: *const SecretKey, out: anytype) !void {
+    pub fn jsonStringify(self: *const SecretKey, out: anytype) (Error || std.json.Error)!void {
         try out.write(self.toString());
     }
 
-    pub fn jsonParse(_: std.mem.Allocator, source: anytype, _: std.json.ParseOptions) !@This() {
+    pub fn jsonParse(_: std.mem.Allocator, source: anytype, _: std.json.ParseOptions) std.json.ParseError(source)!@This() {
         return switch (try source.next()) {
             .string, .allocated_string => |hex_sec| SecretKey.fromString(hex_sec) catch return error.UnexpectedToken,
             else => return error.UnexpectedToken,
@@ -527,7 +526,7 @@ pub const SecretKey = struct {
 };
 
 test "PublicKey combine table test" {
-    const secp = try Secp256k1.genNew();
+    const secp = Secp256k1.genNew();
     defer secp.deinit();
 
     // Test vectors stolen from https://web.archive.org/web/20190724010836/https://chuckbatson.wordpress.com/2014/11/26/secp256k1-test-vectors/.
@@ -576,7 +575,7 @@ test "Secret sign" {
 }
 
 test "Schnorr sign" {
-    const secp = try Secp256k1.genNew();
+    const secp = Secp256k1.genNew();
     defer secp.deinit();
 
     const sk = try KeyPair.fromSeckeyStr(&secp, "688C77BC2D5AAFF5491CF309D4753B732135470D05B7B2CD21ADD0744FE97BEF");
@@ -589,7 +588,7 @@ test "Schnorr sign" {
 
     const expected_sig = try schnorr_lib.Signature.fromStr("6470FD1303DDA4FDA717B9837153C24A6EAB377183FC438F939E0ED2B620E9EE5077C4A8B8DCA28963D772A94F5F0DDF598E1C47C137F91933274C7C3EDADCE8");
 
-    const sig = try secp.signSchnorrWithAuxRand(msg[0..32].*, sk, aux_rand[0..32].*);
+    const sig = secp.signSchnorrWithAuxRand(msg[0..32].*, sk, aux_rand[0..32].*);
 
     try std.testing.expectEqualDeep(
         expected_sig,
@@ -598,7 +597,7 @@ test "Schnorr sign" {
 }
 
 test "ECDSA verify" {
-    const secp = try Secp256k1.genNew();
+    const secp = Secp256k1.genNew();
     defer secp.deinit();
 
     const privKey = try SecretKey.fromString("d7fbc57b49b696ceaad08400622a5e8cf3f422774e67f35d3cee366e04926f65");
@@ -609,7 +608,7 @@ test "ECDSA verify" {
     // zig bitcoin
     const msg = try std.fmt.hexToBytes(&buf, "D95F5DB92F175E6489219D1B23B3EFBF0D353DED9224DCD4B9AF3F3CB983469B");
 
-    const sig = secp.signEcdsa(.{ .inner = msg[0..32].* }, privKey);
+    const sig = secp.signEcdsa(&.{ .inner = msg[0..32].* }, &privKey);
 
     try secp.verifyEcdsa(.{ .inner = msg[0..32].* }, sig, pubKey);
 }
