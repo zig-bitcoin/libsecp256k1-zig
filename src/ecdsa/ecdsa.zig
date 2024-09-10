@@ -8,7 +8,7 @@ const secp256k1 = @cImport({
 const secp = @import("../secp256k1.zig");
 
 const serialized_signature = @import("serialized_signature.zig");
-const SerializedSignature = @import("serialized_signature.zig").SerializedSignature;
+pub const SerializedSignature = @import("serialized_signature.zig").SerializedSignature;
 const Error = secp.Error;
 const ErrorParseHex = secp.ErrorParseHex;
 
