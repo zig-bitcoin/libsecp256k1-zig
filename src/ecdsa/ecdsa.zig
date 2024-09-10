@@ -205,6 +205,7 @@ pub const Secp = struct {
         var entropy_p: ?*anyopaque = null;
         var counter: u32 = 0;
         var extra_entropy = [_]u8{0} ** 32;
+
         while (true) {
             var ret: secp256k1.secp256k1_ecdsa_signature = .{};
             // We can assume the return value because it's not possible to construct
@@ -243,13 +244,18 @@ pub const Secp = struct {
         sk: secp.SecretKey,
         bytes_to_grind: usize,
     ) Signature {
-        const len_check = (struct {
-            fn check(s: secp256k1.secp256k1_ecdsa_signature) bool {
-                return derLengthCheck(s, 71 - bytes_to_grind);
-            }
-        }).check;
+        const Type =
+            struct {
+            var _bytes_to_grind: usize = 0;
 
-        return signGrindWithCheck(self, msg, sk, &len_check);
+            fn check(s: secp256k1.secp256k1_ecdsa_signature) bool {
+                return derLengthCheck(s, 71 - @This()._bytes_to_grind);
+            }
+        };
+
+        Type._bytes_to_grind = bytes_to_grind;
+
+        return signGrindWithCheck(self, msg, sk, &Type.check);
     }
 
     /// Constructs a signature for `msg` using the secret key `sk`, RFC6979 nonce
@@ -361,3 +367,19 @@ test "test sign ecdsa with nonce data" {
     // Ensure the signature is valid
     try s.verifyEcdsa(message, signature, pk);
 }
+
+// Slow search, so we dont need to include it
+// test "test sign ecdsa grind r" {
+//     const s = secp.Secp256k1.genNew();
+
+//     const msg = secp.Message.fromDigest([_]u8{0xab} ** 32);
+//     const sk = try secp.SecretKey.fromSlice(&[_]u8{0xcd} ** 32);
+//     const bytes_to_grind = 10;
+
+//     const signature = s.signEcdsaGrindR(msg, sk, bytes_to_grind);
+
+//     // Check if the signature length is less than 71 - bytes_to_grind
+//     const der_signature = signature.serializeDer();
+
+//     try std.testing.expect(der_signature.len < 71 - bytes_to_grind);
+// }
