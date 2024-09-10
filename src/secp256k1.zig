@@ -38,6 +38,9 @@ pub const Error = error{
 
 pub const ecdsa = struct {
     pub const Signature = ecdsa_lib.Signature;
+    pub const SerializedSignature = ecdsa_lib.SerializedSignature;
+    pub const RecoverableSignature = recovery_lib.RecoverableSignature;
+    pub const RecoveryId = recovery_lib.RecoveryId;
 };
 
 pub const schnorr = struct {
