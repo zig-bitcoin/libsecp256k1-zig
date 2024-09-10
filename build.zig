@@ -11,7 +11,6 @@ fn buildSecp256k1(libsecp_c: *std.Build.Dependency, b: *std.Build, target: std.B
     lib.addIncludePath(libsecp_c.path(""));
     lib.addIncludePath(libsecp_c.path("src"));
     lib.addIncludePath(libsecp_c.path("include"));
-    // lib.addIncludePath(libsecp_c.path("contrib"));
 
     var flags = std.ArrayList([]const u8).init(b.allocator);
     defer flags.deinit();
@@ -25,7 +24,6 @@ fn buildSecp256k1(libsecp_c: *std.Build.Dependency, b: *std.Build, target: std.B
         .root = libsecp_c.path(""),
         .flags = flags.items,
         .files = &.{
-            // "./contrib/lax_der_parsing.c",
             "./src/secp256k1.c",
             "./src/precomputed_ecmult.c",
             "./src/precomputed_ecmult_gen.c",
@@ -40,8 +38,6 @@ fn buildSecp256k1(libsecp_c: *std.Build.Dependency, b: *std.Build, target: std.B
 
     lib.installHeadersDirectory(libsecp_c.path("src"), "", .{ .include_extensions = &.{".h"} });
     lib.installHeadersDirectory(libsecp_c.path("include/"), "", .{ .include_extensions = &.{".h"} });
-    // lib.installHeadersDirectory(libsecp_c.path("contrib/"), "", .{ .include_extensions = &.{".h"} });
-    // lib.installHeader(libsecp_c.path("contrib"), "lax_der_parsing.h");
     lib.linkLibC();
 
     return lib;
