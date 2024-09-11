@@ -1,9 +1,10 @@
 const std = @import("std");
 const crypto = std.crypto;
-const constants = @import("constants.zig");
 const ecdsa_lib = @import("ecdsa/ecdsa.zig");
 const recovery_lib = @import("ecdsa/recovery.zig");
 const schnorr_lib = @import("schnorr.zig");
+
+pub const constants = @import("constants.zig");
 
 /// The main error type for this library.
 pub const Error = error{
@@ -251,11 +252,11 @@ pub const PublicKey = struct {
     }
 
     // json serializing func
-    pub fn jsonStringify(self: PublicKey, out: anytype) (Error || std.json.Error)!void {
+    pub fn jsonStringify(self: PublicKey, out: anytype) !void {
         try out.write(std.fmt.bytesToHex(&self.serialize(), .lower));
     }
 
-    pub fn jsonParse(_: std.mem.Allocator, source: anytype, _: std.json.ParseOptions) std.json.Error!@This() {
+    pub fn jsonParse(_: std.mem.Allocator, source: anytype, _: std.json.ParseOptions) !@This() {
         switch (try source.next()) {
             .string => |s| {
                 var hex_buffer: [60]u8 = undefined;
@@ -516,11 +517,11 @@ pub const SecretKey = struct {
         }
     }
 
-    pub fn jsonStringify(self: *const SecretKey, out: anytype) (Error || std.json.Error)!void {
+    pub fn jsonStringify(self: *const SecretKey, out: anytype) !void {
         try out.write(self.toString());
     }
 
-    pub fn jsonParse(_: std.mem.Allocator, source: anytype, _: std.json.ParseOptions) std.json.ParseError(source)!@This() {
+    pub fn jsonParse(_: std.mem.Allocator, source: anytype, _: std.json.ParseOptions) !@This() {
         return switch (try source.next()) {
             .string, .allocated_string => |hex_sec| SecretKey.fromString(hex_sec) catch return error.UnexpectedToken,
             else => return error.UnexpectedToken,

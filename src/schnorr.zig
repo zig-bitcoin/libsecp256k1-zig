@@ -27,6 +27,10 @@ pub const Signature = struct {
 
         return .{ .inner = res };
     }
+
+    pub inline fn toStr(self: *const Signature) [constants.schnorr_signature_size * 2]u8 {
+        return std.fmt.bytesToHex(self.inner, .lower);
+    }
 };
 
 pub const Secp = struct {
