@@ -28,6 +28,9 @@ pub const Signature = struct {
         return .{ .inner = res };
     }
 
+    /// Encodes a sequence of bytes as hexadecimal digits.
+    /// Returns an array containing the encoded bytes.
+    /// Lower-case format "abc"
     pub inline fn toStr(self: *const Signature) [constants.schnorr_signature_size * 2]u8 {
         return std.fmt.bytesToHex(self.inner, .lower);
     }
